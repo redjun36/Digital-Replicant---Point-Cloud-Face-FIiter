@@ -3,8 +3,8 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { gsap } from 'gsap'
 
-const COLS   = 58
-const ROWS   = 78
+const COLS   = 100
+const ROWS   = 82
 const MAX_N  = COLS * ROWS
 const WORLD_W = 3.2
 const WORLD_H = 2.6

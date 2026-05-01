@@ -15,8 +15,9 @@ export default function App() {
   const [handLandmarker, setHandLandmarker] = useState(null)
   const [phase, setPhase] = useState('loading')
   const [error, setError] = useState(null)
-  const [sizeScale, setSizeScale] = useState(1.0)
-  const [shape,     setShape]     = useState(0)
+  const [sizeScale,    setSizeScale]    = useState(1.0)
+  const [shape,        setShape]        = useState(0)
+  const [handEnabled,  setHandEnabled]  = useState(true)
 
   // Ref so HandGesture can always read the latest shape without stale closure
   const shapeRef = useRef(0)
@@ -95,19 +96,23 @@ export default function App() {
               sizeScale={sizeScale}
               shape={shape}
             />
-            <HandGesture
-              videoRef={videoRef}
-              handLandmarker={handLandmarker}
-              shapeRef={shapeRef}
-              onSize={setSizeScale}
-              onShape={setShape}
-            />
+            {handEnabled && (
+              <HandGesture
+                videoRef={videoRef}
+                handLandmarker={handLandmarker}
+                shapeRef={shapeRef}
+                onSize={setSizeScale}
+                onShape={setShape}
+              />
+            )}
           </Canvas>
           <ControlPanel
             sizeVal={sizeScale}
             activeShape={shape}
             onSize={setSizeScale}
             onShape={setShape}
+            handEnabled={handEnabled}
+            onHandToggle={setHandEnabled}
           />
         </>
       )}

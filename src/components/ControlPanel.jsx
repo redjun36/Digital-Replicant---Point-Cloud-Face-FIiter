@@ -5,7 +5,7 @@ const SHAPES = [
   { id: 3, label: '# Numbers' },
 ]
 
-export default function ControlPanel({ sizeVal, activeShape, onSize, onShape }) {
+export default function ControlPanel({ sizeVal, activeShape, onSize, onShape, handEnabled, onHandToggle }) {
   return (
     <div style={{
       position: 'fixed', top: 24, right: 24, zIndex: 20,
@@ -36,7 +36,7 @@ export default function ControlPanel({ sizeVal, activeShape, onSize, onShape }) 
 
       {/* Shape */}
       <p style={styles.label}>Shape</p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 18 }}>
         {SHAPES.map(sh => (
           <button key={sh.id} onClick={() => onShape(sh.id)} style={{
             ...styles.btn,
@@ -47,6 +47,45 @@ export default function ControlPanel({ sizeVal, activeShape, onSize, onShape }) 
             {sh.label}
           </button>
         ))}
+      </div>
+
+      {/* Hand Interaction Toggle */}
+      <div style={{
+        borderTop: '1px solid rgba(255,255,255,0.07)',
+        paddingTop: 14,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 10,
+      }}>
+        <span style={{ ...styles.label, margin: 0 }}>Hand Control</span>
+        <button
+          onClick={() => onHandToggle(v => !v)}
+          style={{
+            position: 'relative',
+            width: 36,
+            height: 20,
+            borderRadius: 10,
+            border: '1px solid rgba(255,255,255,0.18)',
+            background: handEnabled ? 'rgba(255,255,255,0.18)' : 'rgba(40,40,40,0.72)',
+            cursor: 'pointer',
+            padding: 0,
+            flexShrink: 0,
+            transition: 'background 0.25s',
+          }}
+        >
+          <span style={{
+            position: 'absolute',
+            top: 2,
+            left: handEnabled ? 17 : 2,
+            width: 14,
+            height: 14,
+            borderRadius: '50%',
+            background: handEnabled ? '#fff' : 'rgba(160,160,160,0.7)',
+            transition: 'left 0.2s cubic-bezier(0.4,0,0.2,1), background 0.25s',
+            display: 'block',
+          }} />
+        </button>
       </div>
     </div>
   )
