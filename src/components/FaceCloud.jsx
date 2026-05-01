@@ -14,10 +14,13 @@ const vert = /* glsl */`
 uniform float uAlpha;
 uniform float uSizeScale;
 attribute float aSize;
+attribute float aDigit;
 varying float vAlpha;
+varying float vDigit;
 
 void main() {
   vAlpha = uAlpha;
+  vDigit = aDigit;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   gl_PointSize = aSize * uSizeScale * (16.0 / -mv.z);
   gl_Position  = projectionMatrix * mv;
@@ -26,18 +29,31 @@ void main() {
 
 const frag = /* glsl */`
 uniform float uShape;
+uniform sampler2D uDigitTex;
 varying float vAlpha;
+varying float vDigit;
 
 void main() {
-  vec2 uv = gl_PointCoord - 0.5;
+  vec2 pc = gl_PointCoord;
+  vec2 uv = pc - 0.5;
   float d = length(uv);
 
   float isCircle = 1.0 - step(0.5, uShape);
   float isSquare = step(0.5, uShape) * (1.0 - step(1.5, uShape));
-  float isRing   = step(1.5, uShape);
+  float isRing   = step(1.5, uShape) * (1.0 - step(2.5, uShape));
+  float isNumber = step(2.5, uShape);
 
   if (isCircle > 0.5 && d > 0.5) discard;
   if (isRing   > 0.5 && (d > 0.5 || d < 0.27)) discard;
+
+  if (isNumber > 0.5) {
+    float digit = floor(vDigit + 0.5);
+    float u = (pc.x + digit) / 10.0;
+    float a = texture2D(uDigitTex, vec2(u, pc.y)).r * vAlpha;
+    if (a < 0.05) discard;
+    gl_FragColor = vec4(1.0, 1.0, 1.0, a);
+    return;
+  }
 
   float circleA = smoothstep(0.5, 0.38, d);
   float squareA = 0.88;
@@ -48,6 +64,21 @@ void main() {
 }
 `
 
+function makeDigitTexture() {
+  const W = 200, H = 20
+  const c = document.createElement('canvas')
+  c.width = W; c.height = H
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = '#000'
+  ctx.fillRect(0, 0, W, H)
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 15px monospace'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  for (let i = 0; i < 10; i++) ctx.fillText(String(i), i * 20 + 10, 10)
+  return new THREE.CanvasTexture(c)
+}
+
 export default function FaceCloud({ videoRef, segmenter, sizeScale = 1.0, shape = 0 }) {
   const groupRef = useRef()
 
@@ -57,10 +88,10 @@ export default function FaceCloud({ videoRef, segmenter, sizeScale = 1.0, shape 
     return c.getContext('2d', { willReadFrequently: true })
   }, [])
 
-  const posArr = useMemo(() => new Float32Array(MAX_N * 3), [])
-  const sizArr = useMemo(() => new Float32Array(MAX_N), [])
+  const posArr  = useMemo(() => new Float32Array(MAX_N * 3), [])
+  const sizArr  = useMemo(() => new Float32Array(MAX_N), [])
+  const digArr  = useMemo(() => new Float32Array(MAX_N), [])
 
-  // Fixed home XY in world space (selfie-mirrored)
   const homeX = useMemo(() => {
     const a = new Float32Array(MAX_N)
     for (let r = 0; r < ROWS; r++)
@@ -77,22 +108,23 @@ export default function FaceCloud({ videoRef, segmenter, sizeScale = 1.0, shape 
     return a
   }, [])
 
-  // Precompute radial fade per point (circular boundary)
   const radialFade = useMemo(() => {
     const a = new Float32Array(MAX_N)
     for (let i = 0; i < MAX_N; i++) {
       const wx = homeX[i], wy = homeY[i]
       const dist = Math.hypot(wx, wy)
-      // Full at center (dist<0.8), fades to 0 by dist=1.3
       a[i] = Math.max(0, 1 - Math.pow(Math.max(0, dist - 0.8) / 0.5, 2))
     }
     return a
   }, [homeX, homeY])
 
-  const homeZ = useRef(new Float32Array(MAX_N))
+  const digitTex = useMemo(() => makeDigitTexture(), [])
+
+  const homeZ  = useRef(new Float32Array(MAX_N))
   const offsets = useRef(Array.from({ length: MAX_N }, () => ({ x: 0, y: 0, z: 0 })))
   const svx     = useRef(new Float32Array(MAX_N))
   const svy     = useRef(new Float32Array(MAX_N))
+  const lastDigitSwap = useRef(0)
 
   const rt    = useRef({ lastVidTime: -1, hasPerson: false, fAlpha: 0 })
   const mouse = useRef({ ndcX: 0, ndcY: 0, wx: 0, wy: 0, drag: false })
@@ -101,21 +133,23 @@ export default function FaceCloud({ videoRef, segmenter, sizeScale = 1.0, shape 
     const g = new THREE.BufferGeometry()
     g.setAttribute('position', new THREE.BufferAttribute(posArr, 3))
     g.setAttribute('aSize',    new THREE.BufferAttribute(sizArr, 1))
+    g.setAttribute('aDigit',   new THREE.BufferAttribute(digArr, 1))
     g.setDrawRange(0, MAX_N)
     return g
-  }, [posArr, sizArr])
+  }, [posArr, sizArr, digArr])
 
   const mat = useMemo(() => new THREE.ShaderMaterial({
     uniforms: {
       uAlpha:     { value: 0 },
       uSizeScale: { value: 1.0 },
       uShape:     { value: 0.0 },
+      uDigitTex:  { value: digitTex },
     },
     vertexShader:   vert,
     fragmentShader: frag,
     transparent:    true,
     depthWrite:     false,
-  }), [])
+  }), [digitTex])
 
   function toWorld(cx, cy) {
     const halfH  = Math.tan(25 * Math.PI / 180) * 3.5
@@ -168,7 +202,6 @@ export default function FaceCloud({ videoRef, segmenter, sizeScale = 1.0, shape 
     if (!video || !segmenter || video.readyState < 2) return
     const s = rt.current
 
-    // Sync control uniforms
     mat.uniforms.uSizeScale.value = sizeScale
     mat.uniforms.uShape.value     = shape
 
@@ -192,11 +225,9 @@ export default function FaceCloud({ videoRef, segmenter, sizeScale = 1.0, shape 
         for (let row = 0; row < ROWS; row++) {
           for (let col = 0; col < COLS; col++) {
             const i = row * COLS + col
-
             const mx   = Math.min(Math.floor(col * maskW / COLS), maskW - 1)
             const my   = Math.min(Math.floor(row * maskH / ROWS), maskH - 1)
             const conf = maskArr[my * maskW + mx]
-
             const rFade = radialFade[i]
 
             if (conf > 0.42 && rFade > 0.01) {
@@ -208,12 +239,10 @@ export default function FaceCloud({ videoRef, segmenter, sizeScale = 1.0, shape 
                 lum = (0.299 * img.data[pi] + 0.587 * img.data[pi + 1] + 0.114 * img.data[pi + 2]) / 255
               }
 
-              // High-contrast luminance → size (dark features = small, bright = large)
               const lumC = Math.pow(lum, 0.45)
               const sizeBase = 0.05 + lumC * 2.2
-
-              sizArr[i]         = sizeBase * rFade
-              homeZ.current[i]  = (lum - 0.5) * 0.9
+              sizArr[i]        = sizeBase * rFade
+              homeZ.current[i] = (lum - 0.5) * 0.9
             } else {
               sizArr[i] = 0
             }
@@ -224,6 +253,18 @@ export default function FaceCloud({ videoRef, segmenter, sizeScale = 1.0, shape 
         geo.attributes.aSize.needsUpdate = true
       } else {
         s.hasPerson = false
+      }
+    }
+
+    // --- Number digit shuffle ---
+    if (shape === 3) {
+      const now = performance.now()
+      if (now - lastDigitSwap.current > 80) {
+        lastDigitSwap.current = now
+        for (let i = 0; i < MAX_N; i++) {
+          if (sizArr[i] > 0.01) digArr[i] = Math.floor(Math.random() * 10)
+        }
+        geo.attributes.aDigit.needsUpdate = true
       }
     }
 

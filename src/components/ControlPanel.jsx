@@ -1,25 +1,11 @@
-import { useState } from 'react'
-
 const SHAPES = [
-  { id: 0, label: '● Circle' },
-  { id: 1, label: '■ Square' },
-  { id: 2, label: '○ Ring'   },
+  { id: 0, label: '● Circle'  },
+  { id: 1, label: '■ Square'  },
+  { id: 2, label: '○ Ring'    },
+  { id: 3, label: '# Numbers' },
 ]
 
-export default function ControlPanel({ onSize, onShape }) {
-  const [sizeVal,    setSizeVal]    = useState(1.0)
-  const [activeShape, setActiveShape] = useState(0)
-
-  function handleSize(v) {
-    setSizeVal(v)
-    onSize(v)
-  }
-
-  function handleShape(sh) {
-    setActiveShape(sh.id)
-    onShape(sh.id)
-  }
-
+export default function ControlPanel({ sizeVal, activeShape, onSize, onShape }) {
   return (
     <div style={{
       position: 'fixed', top: 24, right: 24, zIndex: 20,
@@ -40,7 +26,7 @@ export default function ControlPanel({ onSize, onShape }) {
           max={4.0}
           step={0.05}
           value={sizeVal}
-          onChange={e => handleSize(parseFloat(e.target.value))}
+          onChange={e => onSize(parseFloat(e.target.value))}
           style={styles.slider}
         />
         <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: 9, marginTop: 4, letterSpacing: '0.1em' }}>
@@ -52,7 +38,7 @@ export default function ControlPanel({ onSize, onShape }) {
       <p style={styles.label}>Shape</p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
         {SHAPES.map(sh => (
-          <button key={sh.id} onClick={() => handleShape(sh)} style={{
+          <button key={sh.id} onClick={() => onShape(sh.id)} style={{
             ...styles.btn,
             ...(activeShape === sh.id ? styles.btnActive : {}),
             textAlign: 'left',

@@ -1,32 +1,46 @@
 import { useEffect, useRef, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { ImageSegmenter, FilesetResolver } from '@mediapipe/tasks-vision'
+import { ImageSegmenter, HandLandmarker, FilesetResolver } from '@mediapipe/tasks-vision'
 import FaceCloud from './components/FaceCloud'
-import ToggleSwitch from './components/ToggleSwitch'
 import ControlPanel from './components/ControlPanel'
+import HandGesture from './components/HandGesture'
 
-const WASM_URL  = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite'
+const WASM_URL       = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+const MODEL_URL      = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite'
+const HAND_MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task'
 
 export default function App() {
   const videoRef = useRef(null)
-  const [segmenter, setSegmenter] = useState(null)
-  const [phase, setPhase]         = useState('loading')
-  const [error, setError]         = useState(null)
+  const [segmenter,     setSegmenter]     = useState(null)
+  const [handLandmarker, setHandLandmarker] = useState(null)
+  const [phase, setPhase] = useState('loading')
+  const [error, setError] = useState(null)
   const [sizeScale, setSizeScale] = useState(1.0)
-  const [shape, setShape]         = useState(0)
+  const [shape,     setShape]     = useState(0)
+
+  // Ref so HandGesture can always read the latest shape without stale closure
+  const shapeRef = useRef(0)
+  useEffect(() => { shapeRef.current = shape }, [shape])
 
   useEffect(() => {
     let alive = true
-    FilesetResolver.forVisionTasks(WASM_URL)
-      .then(v => ImageSegmenter.createFromOptions(v, {
+    FilesetResolver.forVisionTasks(WASM_URL).then(v => Promise.all([
+      ImageSegmenter.createFromOptions(v, {
         baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
         runningMode: 'VIDEO',
         outputCategoryMask: false,
         outputConfidenceMasks: true,
-      }))
-      .then(seg => { if (alive) { setSegmenter(seg); setPhase('ready') } })
-      .catch(e  => { if (alive) { setError(e.message); setPhase('ready') } })
+      }),
+      HandLandmarker.createFromOptions(v, {
+        baseOptions: { modelAssetPath: HAND_MODEL_URL, delegate: 'GPU' },
+        runningMode: 'VIDEO',
+        numHands: 1,
+      }),
+    ])).then(([seg, hand]) => {
+      if (alive) { setSegmenter(seg); setHandLandmarker(hand); setPhase('ready') }
+    }).catch(e => {
+      if (alive) { setError(e.message); setPhase('ready') }
+    })
     return () => { alive = false }
   }, [])
 
@@ -62,6 +76,7 @@ export default function App() {
       }}>
         Digital<br />Replica
       </div>
+
       <video
         ref={videoRef} autoPlay muted playsInline
         style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 1, height: 1 }}
@@ -80,16 +95,27 @@ export default function App() {
               sizeScale={sizeScale}
               shape={shape}
             />
+            <HandGesture
+              videoRef={videoRef}
+              handLandmarker={handLandmarker}
+              shapeRef={shapeRef}
+              onSize={setSizeScale}
+              onShape={setShape}
+            />
           </Canvas>
-          <ToggleSwitch />
-          <ControlPanel onSize={setSizeScale} onShape={setShape} />
+          <ControlPanel
+            sizeVal={sizeScale}
+            activeShape={shape}
+            onSize={setSizeScale}
+            onShape={setShape}
+          />
         </>
       )}
 
       {phase !== 'running' && (
         <div style={styles.overlay}>
           <span style={styles.label}>
-            {phase === 'loading' ? 'Loading model' : error || 'Ready'}
+            {phase === 'loading' ? 'Loading models' : error || 'Ready'}
           </span>
           {phase === 'ready' && !error && (
             <button onClick={startCamera} style={styles.btn}>Start Camera</button>
