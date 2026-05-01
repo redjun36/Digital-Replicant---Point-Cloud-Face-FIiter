@@ -1,13 +1,11 @@
-import { useRef, useMemo, useEffect, useCallback } from 'react'
+import { useRef, useMemo, useEffect, useCallback, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { gsap } from 'gsap'
 
-const COLS   = 100
-const ROWS   = 82
-const MAX_N  = COLS * ROWS
-const WORLD_W = 3.2
-const WORLD_H = 2.6
+const COLS  = 100
+const ROWS  = 82
+const MAX_N = COLS * ROWS
 
 // ── Shaders ──────────────────────────────────────────────────────────────────
 const vert = /* glsl */`
@@ -79,8 +77,34 @@ function makeDigitTexture() {
   return new THREE.CanvasTexture(c)
 }
 
+function getWorldDims(aspect) {
+  const halfH  = Math.tan(25 * Math.PI / 180) * 3.5
+  const visH   = halfH * 2
+  const visW   = visH * aspect
+  return {
+    worldW: Math.min(3.2, visW * 0.88),
+    worldH: Math.min(2.6, visH * 0.88),
+  }
+}
+
 export default function FaceCloud({ videoRef, segmenter, sizeScale = 1.0, shape = 0 }) {
   const groupRef = useRef()
+
+  // Reactive screen aspect for orientation changes
+  const [screenAspect, setScreenAspect] = useState(
+    () => window.innerWidth / window.innerHeight
+  )
+  useEffect(() => {
+    const handler = () => setScreenAspect(window.innerWidth / window.innerHeight)
+    window.addEventListener('resize', handler)
+    window.addEventListener('orientationchange', handler)
+    return () => {
+      window.removeEventListener('resize', handler)
+      window.removeEventListener('orientationchange', handler)
+    }
+  }, [])
+
+  const { worldW, worldH } = useMemo(() => getWorldDims(screenAspect), [screenAspect])
 
   const sCtx = useMemo(() => {
     const c = document.createElement('canvas')
@@ -88,35 +112,37 @@ export default function FaceCloud({ videoRef, segmenter, sizeScale = 1.0, shape 
     return c.getContext('2d', { willReadFrequently: true })
   }, [])
 
-  const posArr  = useMemo(() => new Float32Array(MAX_N * 3), [])
-  const sizArr  = useMemo(() => new Float32Array(MAX_N), [])
-  const digArr  = useMemo(() => new Float32Array(MAX_N), [])
+  const posArr = useMemo(() => new Float32Array(MAX_N * 3), [])
+  const sizArr = useMemo(() => new Float32Array(MAX_N), [])
+  const digArr = useMemo(() => new Float32Array(MAX_N), [])
 
   const homeX = useMemo(() => {
     const a = new Float32Array(MAX_N)
     for (let r = 0; r < ROWS; r++)
       for (let c = 0; c < COLS; c++)
-        a[r * COLS + c] = ((COLS - 1 - c) / (COLS - 1) - 0.5) * WORLD_W
+        a[r * COLS + c] = ((COLS - 1 - c) / (COLS - 1) - 0.5) * worldW
     return a
-  }, [])
+  }, [worldW])
 
   const homeY = useMemo(() => {
     const a = new Float32Array(MAX_N)
     for (let r = 0; r < ROWS; r++)
       for (let c = 0; c < COLS; c++)
-        a[r * COLS + c] = (0.5 - r / (ROWS - 1)) * WORLD_H
+        a[r * COLS + c] = (0.5 - r / (ROWS - 1)) * worldH
     return a
-  }, [])
+  }, [worldH])
 
   const radialFade = useMemo(() => {
+    const maxR      = Math.min(worldW, worldH) * 0.5
+    const fadeStart = maxR * 0.6
+    const fadeRange = maxR * 0.4
     const a = new Float32Array(MAX_N)
     for (let i = 0; i < MAX_N; i++) {
-      const wx = homeX[i], wy = homeY[i]
-      const dist = Math.hypot(wx, wy)
-      a[i] = Math.max(0, 1 - Math.pow(Math.max(0, dist - 0.8) / 0.5, 2))
+      const dist = Math.hypot(homeX[i], homeY[i])
+      a[i] = Math.max(0, 1 - Math.pow(Math.max(0, dist - fadeStart) / fadeRange, 2))
     }
     return a
-  }, [homeX, homeY])
+  }, [homeX, homeY, worldW, worldH])
 
   const digitTex = useMemo(() => makeDigitTexture(), [])
 
@@ -178,9 +204,11 @@ export default function FaceCloud({ videoRef, segmenter, sizeScale = 1.0, shape 
 
   useEffect(() => {
     const onMove = (e) => {
-      mouse.current.ndcX = (e.clientX / window.innerWidth)  * 2 - 1
-      mouse.current.ndcY = -((e.clientY / window.innerHeight) * 2 - 1)
-      const w = toWorld(e.clientX, e.clientY)
+      const cx = e.touches ? e.touches[0].clientX : e.clientX
+      const cy = e.touches ? e.touches[0].clientY : e.clientY
+      mouse.current.ndcX = (cx / window.innerWidth)  * 2 - 1
+      mouse.current.ndcY = -((cy / window.innerHeight) * 2 - 1)
+      const w = toWorld(cx, cy)
       mouse.current.wx = w.x; mouse.current.wy = w.y
     }
     const onDown = () => { mouse.current.drag = true }
@@ -218,28 +246,35 @@ export default function FaceCloud({ videoRef, segmenter, sizeScale = 1.0, shape 
         const maskW   = mask.width
         const maskH   = mask.height
 
-        sCtx.drawImage(video, 0, 0, 640, 480)
+        // Adapt canvas to actual video dimensions
+        const vW = video.videoWidth  || 640
+        const vH = video.videoHeight || 480
+        if (sCtx.canvas.width !== vW || sCtx.canvas.height !== vH) {
+          sCtx.canvas.width  = vW
+          sCtx.canvas.height = vH
+        }
+        sCtx.drawImage(video, 0, 0, vW, vH)
         let img = null
-        try { img = sCtx.getImageData(0, 0, 640, 480) } catch {}
+        try { img = sCtx.getImageData(0, 0, vW, vH) } catch {}
 
         for (let row = 0; row < ROWS; row++) {
           for (let col = 0; col < COLS; col++) {
             const i = row * COLS + col
-            const mx   = Math.min(Math.floor(col * maskW / COLS), maskW - 1)
-            const my   = Math.min(Math.floor(row * maskH / ROWS), maskH - 1)
-            const conf = maskArr[my * maskW + mx]
+            const mx    = Math.min(Math.floor(col * maskW / COLS), maskW - 1)
+            const my    = Math.min(Math.floor(row * maskH / ROWS), maskH - 1)
+            const conf  = maskArr[my * maskW + mx]
             const rFade = radialFade[i]
 
             if (conf > 0.42 && rFade > 0.01) {
               let lum = 0.5
               if (img) {
-                const vx  = Math.min(Math.floor(col * 640 / COLS), 639)
-                const vy  = Math.min(Math.floor(row * 480 / ROWS), 479)
-                const pi  = (vy * 640 + vx) * 4
+                const vx = Math.min(Math.floor(col * vW / COLS), vW - 1)
+                const vy = Math.min(Math.floor(row * vH / ROWS), vH - 1)
+                const pi = (vy * vW + vx) * 4
                 lum = (0.299 * img.data[pi] + 0.587 * img.data[pi + 1] + 0.114 * img.data[pi + 2]) / 255
               }
 
-              const lumC = Math.pow(lum, 0.45)
+              const lumC    = Math.pow(lum, 0.45)
               const sizeBase = 0.05 + lumC * 2.2
               sizArr[i]        = sizeBase * rFade
               homeZ.current[i] = (lum - 0.5) * 0.9

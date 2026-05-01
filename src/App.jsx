@@ -48,8 +48,13 @@ export default function App() {
   async function startCamera() {
     setError(null)
     try {
+      const portrait = window.innerHeight > window.innerWidth
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+        video: {
+          width:  { ideal: portrait ? 480 : 640 },
+          height: { ideal: portrait ? 640 : 480 },
+          facingMode: 'user',
+        },
       })
       videoRef.current.srcObject = stream
       await new Promise(r => videoRef.current.addEventListener('loadeddata', r, { once: true }))
